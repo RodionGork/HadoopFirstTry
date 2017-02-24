@@ -1,6 +1,6 @@
 <?php
 
-$start = 40000;
+$start = rand(10000, 50000);
 $n = 10;
 
 @mkdir('input');
