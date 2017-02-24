@@ -25,8 +25,12 @@ public class App {
                     ) throws IOException, InterruptedException {
       StringTokenizer itr = new StringTokenizer(value.toString());
       while (itr.hasMoreTokens()) {
-        word.set(itr.nextToken());
-        context.write(word, one);
+        String token = itr.nextToken().toLowerCase();
+        token = token.replaceFirst("^[^a-z\\-]*([a-z]*)[^a-z\\-]*$", "$1");
+        if (token.matches("[a-z]+")) {
+          word.set(token);
+          context.write(word, one);
+        }
       }
     }
   }
@@ -52,7 +56,7 @@ public class App {
     Job job = Job.getInstance(conf, "word count");
     job.setJarByClass(App.class);
     job.setMapperClass(TokenizerMapper.class);
-    job.setCombinerClass(IntSumReducer.class);
+    //job.setCombinerClass(IntSumReducer.class);
     job.setReducerClass(IntSumReducer.class);
     job.setOutputKeyClass(Text.class);
     job.setOutputValueClass(IntWritable.class);
