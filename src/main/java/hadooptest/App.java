@@ -6,6 +6,7 @@ import java.io.DataOutput;
 import java.util.StringTokenizer;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.Text;
@@ -14,8 +15,10 @@ import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.input.SequenceFileInputFormat;
 import org.apache.hadoop.mapreduce.lib.jobcontrol.JobControl;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat;
 
 public class App {
     
@@ -95,23 +98,28 @@ public class App {
     
     
     public static class SortingMapper
-        extends Mapper<Object, Text, WordCounter, IntWritable> {
+        extends Mapper<Text, IntWritable, WordCounter, IntWritable> {
         
-        public void map(Object key, Text value, Context context)
+        public void map(Text key, IntWritable value, Context context)
                 throws IOException, InterruptedException {
-            String[] parts = value.toString().split("\\t");
-            int count = Integer.parseInt(parts[1]);
-            context.write(WordCounter.create(parts[0], count), new IntWritable(count));
+            context.write(WordCounter.create(key.toString(), value.get()), value);
         }
     }
     
-    public static class DummyReducer
-            extends Reducer<WordCounter, IntWritable, WordCounter, IntWritable> {
-        
+    private void removeDir(String name) throws IOException {
+        Path dirPath = new Path(name);
+        dirPath.getFileSystem(new Configuration()).delete(dirPath, true);
     }
     
-    public static void main(String[] args) throws Exception {
-        String tempName = "temp" + System.currentTimeMillis();
+    private long runJob(Job job) throws Exception {
+        long t = System.currentTimeMillis();
+        job.waitForCompletion(true);
+        return System.currentTimeMillis() - t;
+    }
+    
+    private void run(String inputPath, String outputPath) throws Exception {
+        String tempPath = "temp" + System.currentTimeMillis();
+        removeDir(outputPath);
         
         Job job = Job.getInstance(new Configuration(), "word count");
         job.setJarByClass(App.class);
@@ -120,19 +128,27 @@ public class App {
         job.setReducerClass(IntSumReducer.class);
         job.setOutputKeyClass(Text.class);
         job.setOutputValueClass(IntWritable.class);
-        FileInputFormat.addInputPath(job, new Path(args[0]));
-        FileOutputFormat.setOutputPath(job, new Path(tempName));
-        job.waitForCompletion(true);
+        job.setOutputFormatClass(SequenceFileOutputFormat.class);
+        FileInputFormat.addInputPath(job, new Path(inputPath));
+        FileOutputFormat.setOutputPath(job, new Path(tempPath));
+        long time1 = runJob(job);
         
         Job job2 = Job.getInstance(new Configuration(), "result sort");
         job2.setJarByClass(App.class);
         job2.setMapperClass(SortingMapper.class);
         job2.setOutputKeyClass(WordCounter.class);
         job2.setOutputValueClass(IntWritable.class);
-        FileInputFormat.addInputPath(job2, new Path(tempName));
-        FileOutputFormat.setOutputPath(job2, new Path(args[1]));
-        job2.waitForCompletion(true);
+        job2.setInputFormatClass(SequenceFileInputFormat.class);
+        FileInputFormat.addInputPath(job2, new Path(tempPath));
+        FileOutputFormat.setOutputPath(job2, new Path(outputPath));
+        long time2 = runJob(job2);
         
+        removeDir(tempPath);
+        System.out.printf("Job 1 took %sms, Job 2 took %sms%n", time1, time2);
+    }
+    
+    public static void main(String[] args) throws Exception {
+        new App().run(args[0], args[1]);
     }
 }
 
