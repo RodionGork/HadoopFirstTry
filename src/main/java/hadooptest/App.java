@@ -71,8 +71,8 @@ public class App {
             StringTokenizer itr = new StringTokenizer(value.toString());
             while (itr.hasMoreTokens()) {
                 String token = itr.nextToken().toLowerCase();
-                token = token.replaceFirst("^[^a-z\\-]*([a-z]*)[^a-z\\-]*$", "$1");
-                if (token.matches("[a-z]+")) {
+                if (token.matches("[^a-z]*[a-z]+[^a-z]*")) {
+                    token = token.replaceFirst("^[^a-z]*([a-z]+)[^a-z]*$", "$1");
                     word.set(token);
                     context.write(word, one);
                 }
