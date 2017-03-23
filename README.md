@@ -1,4 +1,4 @@
-#Hadoop First Try
+# Hadoop First Try
 
 basic setup to compile MapReduce job (word count) for Hadoop with Maven
 
