@@ -3,3 +3,6 @@ input*
 output*
 temp*
 *.log
+dependency-reduced-pom.xml
+.idea
+*.iml

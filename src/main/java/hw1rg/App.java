@@ -9,110 +9,105 @@ import org.apache.hadoop.fs.RemoteIterator;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.util.AbstractMap;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.io.PrintWriter;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 public class App {
 
-    private static class CompactString {
-        
-        private byte[] body;
-        private int hash;
-        
-        private CompactString(String s) {
-            body = s.getBytes();
-            hash = Arrays.hashCode(body);
-        }
-        
-        @Override
-        public boolean equals(Object o) {
-            return (o instanceof CompactString)
-                && Arrays.equals(((CompactString) o).body, body);
-        }
-        
-        @Override
-        public int hashCode() {
-            return hash;
-        }
-        
-        @Override
-        public String toString() {
-            return new String(body);
-        }
-        
-    }
-    
-    public static void main(String[] args) throws Exception {
+    private static final int TOP_RESULTS_COUNT = 100;
+    private static final int RECORDS_COUNT_REPORT_INTERVAL = 100000;
+    private static final int RECORD_FIELD_COUNT = 21;
+    private static final int RECORD_ID_FIELD_POS = 2;
+
+    public static void main(String[] args) {
+        long t = System.currentTimeMillis();
         new App().run(args[0], args[1]);
+        System.out.printf("Time taken %.3f seconds%n", (System.currentTimeMillis() - t) / 1000.0);
     }
 
-    private void run(String input, String output) throws Exception {
+    private void run(String input, String output) {
         Path inputPath = new Path(input);
-        FileSystem fileSystem = FileSystem.get(inputPath.toUri(), new Configuration());
-        List<Path> inputFiles = collectFilePaths(fileSystem, inputPath);
-        Map<CompactString, AtomicLong> counters = new HashMap<>();
-        long skipped = 0;
-        long parsed = 0;
+        FileSystem inputFileSystem = getFileSystemForPath(inputPath);
+        List<Path> inputFiles = collectFilePaths(inputFileSystem, inputPath);
+        Map<String, AtomicLong> counters = countForAllFiles(inputFileSystem, inputFiles);
+        writeTopCounters(output, retrieveTopCounters(counters));
+    }
+
+    private void writeTopCounters(String output, List<Map.Entry<String, Long>> result) {
+        Path outputPath = new Path(output);
+        FileSystem outputFileSystem = getFileSystemForPath(outputPath);
+        try (PrintWriter writer = new PrintWriter(outputFileSystem.create(outputPath, true))) {
+            for (Map.Entry<String, Long> e : result) {
+                writer.printf("%s\t%s%n", e.getKey(), e.getValue());
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Error while writing results to " + output, e);
+        }
+        System.out.println("Results were successfully saved to: " + output);
+    }
+
+    private List<Map.Entry<String, Long>> retrieveTopCounters(Map<String, AtomicLong> counters) {
+        List<Map.Entry<String, Long>> result = counters.entrySet().stream()
+                .map(e -> new AbstractMap.SimpleEntry<>(e.getKey(), e.getValue().get())).collect(Collectors.toList());
+        result.sort((x, y) -> Long.compare(y.getValue(), x.getValue()));
+        return result.subList(0, TOP_RESULTS_COUNT);
+    }
+
+    private FileSystem getFileSystemForPath(Path inputPath) {
+        try {
+            return FileSystem.get(inputPath.toUri(), new Configuration());
+        } catch (IOException e) {
+            throw new RuntimeException("Error preparing filesystem object for path: " + inputPath, e);
+        }
+    }
+
+    private Map<String, AtomicLong> countForAllFiles(FileSystem fileSystem, List<Path> inputFiles) {
+        Map<String, AtomicLong> counters = new HashMap<>();
         for (Path file : inputFiles) {
-            System.out.println("File: " + file);
-            BufferedReader reader = new BufferedReader(new InputStreamReader(fileSystem.open(file)));
-            while (true) {
-                String line = reader.readLine();
-                if (line == null) {
-                    break;
-                }
-                String[] parts = line.split("\\t");
-                if (parts.length != 21) {
-                    skipped += 1;
-                    continue;
-                }
-                parsed += 1;
-                CompactString id = new CompactString(parts[2]);
-                AtomicLong counter = counters.get(id);
-                if (counter == null) {
-                    counter = new AtomicLong();
-                    counters.put(id, counter);
-                    if (counters.size() % 10000 == 0) {
-                        System.out.println("Counters: " + counters.size());
-                    }
-                }
-                counter.incrementAndGet();
+            System.out.println("Parsing file: " + file);
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(fileSystem.open(file)))) {
+                countForOneFile(counters, reader);
+            } catch (IOException e) {
+                throw new RuntimeException("Error while reading " + file, e);
             }
         }
-        System.out.printf("Total lines parsed: %s, skipped: %s, unique ids: %s%n", parsed, skipped, counters.size());
-        long[] cnts = new long[counters.size()];
-        int i = 0;
-        for (AtomicLong v : counters.values()) {
-            cnts[i] = v.get();
-            i += 1;
-        }
-        Arrays.sort(cnts);
-        long threshold = cnts[cnts.length - 100];
-        List<Map.Entry<String, Long>> result = new ArrayList<>();
-        for (Map.Entry<CompactString, AtomicLong> e : counters.entrySet()) {
-            if (e.getValue().get() < threshold) {
+        System.out.printf("Total files processed: %s, unique ids: %s%n", inputFiles.size(), counters.size());
+        return counters;
+    }
+
+    private void countForOneFile(Map<String, AtomicLong> counters, BufferedReader reader) throws IOException {
+        long lines = 0;
+        while (true) {
+            String line = reader.readLine();
+            if (line == null) {
+                break;
+            }
+            String[] parts = line.split("\\t");
+            if (parts.length != RECORD_FIELD_COUNT) {
                 continue;
             }
-            result.add(new AbstractMap.SimpleEntry<>(e.getKey().toString(), e.getValue().get()));
-        }
-        Collections.sort(result, (x, y) -> y.getValue().compareTo(x.getValue()));
-        for (Map.Entry<String, Long> e : result) {
-            System.out.printf("%s: %s%n", e.getKey(), e.getValue());
+            lines += 1;
+            String id = parts[RECORD_ID_FIELD_POS];
+            AtomicLong counter = counters.computeIfAbsent(id, k -> new AtomicLong());
+            counter.incrementAndGet();
+            if (lines % RECORDS_COUNT_REPORT_INTERVAL == 0) {
+                System.out.printf("lines read: %d, unique ids total: %d%n", lines, counters.size());
+            }
         }
     }
 
-    private List<Path> collectFilePaths(FileSystem fileSystem, Path inputPath) throws IOException {
+    private List<Path> collectFilePaths(FileSystem fileSystem, Path inputPath) {
         List<Path> inputFiles = new ArrayList<>();
-        RemoteIterator<LocatedFileStatus> it = fileSystem.listFiles(extractOnlyPath(inputPath), true);
-        while (it.hasNext()) {
-            LocatedFileStatus file = it.next();
-            inputFiles.add(extractOnlyPath(file.getPath()));
+        try {
+            RemoteIterator<LocatedFileStatus> it = fileSystem.listFiles(extractOnlyPath(inputPath), true);
+            while (it.hasNext()) {
+                LocatedFileStatus file = it.next();
+                inputFiles.add(extractOnlyPath(file.getPath()));
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Error while enumerating input files", e);
         }
         return inputFiles;
     }
