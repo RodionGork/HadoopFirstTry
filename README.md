@@ -1,10 +1,6 @@
-#Hadoop First Try
+#Hadoop HDFS Homework
 
-basic setup to compile MapReduce job (word count) for Hadoop with Maven
+Counting bids with the same ID. See bid.example.txt.
 
-To run download hadoop, create input folder with some text files (optionally,
-run a script harvesting few books from project gutenberg), build with maven and run:
-
-- php -f harvest-gutenberg.php
 - mvn package
-- hadoop jar target/hadoop-test.jar input output
+- hadoop jar target/homework-hdfs.jar hdfs://localhost:9000/input hdfs://localhost:9000/output.txt
