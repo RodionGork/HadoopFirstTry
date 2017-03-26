@@ -1,10 +1,7 @@
-# Hadoop First Try
+# Hadoop Second Homework
 
-basic setup to compile MapReduce job (word count) for Hadoop with Maven
+MapReduce job to find the longest word
 
-To run download hadoop, create input folder with some text files (optionally,
-run a script harvesting few books from project gutenberg), build with maven and run:
-
-- php -f harvest-gutenberg.php
-- mvn package
-- hadoop jar target/hadoop-test.jar input output
+    mvn exec:java -Dexec.mainClass="hw2rg.InputGen" -Dexec.args="input-mini 3 25000000"
+    
+    hadoop jar target/homework-mr.jar input output 
