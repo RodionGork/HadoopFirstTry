@@ -11,6 +11,10 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
@@ -64,17 +68,45 @@ public class App {
     }
 
     private Map<String, AtomicLong> countForAllFiles(FileSystem fileSystem, List<Path> inputFiles) {
-        Map<String, AtomicLong> counters = new HashMap<>();
+        int threads = determineThreadNumber();
+        System.out.println("Threads: " + threads);
+        Map<String, AtomicLong> counters = threads > 1 ? new ConcurrentHashMap<>() : new HashMap<>();
+        ExecutorService service = Executors.newFixedThreadPool(threads);
         for (Path file : inputFiles) {
-            System.out.println("Parsing file: " + file);
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(fileSystem.open(file)))) {
-                countForOneFile(counters, reader);
-            } catch (IOException e) {
-                throw new RuntimeException("Error while reading " + file, e);
-            }
+            service.submit(() -> {
+                processOneFile(fileSystem, file, counters);
+            });
+        }
+        service.shutdown();
+        try {
+            service.awaitTermination(1, TimeUnit.HOURS);
+        } catch (InterruptedException e) {
+            System.out.println("Interrupted...");
         }
         System.out.printf("Total files processed: %s, unique ids: %s%n", inputFiles.size(), counters.size());
         return counters;
+    }
+
+    private void processOneFile(FileSystem fileSystem, Path file, Map<String, AtomicLong> counters) {
+        System.out.println("Parsing file: " + file);
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(fileSystem.open(file)))) {
+            countForOneFile(counters, reader);
+        } catch (IOException e) {
+            throw new RuntimeException("Error while reading " + file, e);
+        }
+    }
+
+    private int determineThreadNumber() {
+        String prop = System.getProperty("multithreaded");
+        if ("".equals(prop)) {
+            return Runtime.getRuntime().availableProcessors();
+        } else {
+            try {
+                return Integer.parseInt(prop);
+            } catch (NumberFormatException | NullPointerException e) {
+                return 1;
+            }
+        }
     }
 
     private void countForOneFile(Map<String, AtomicLong> counters, BufferedReader reader) throws IOException {
