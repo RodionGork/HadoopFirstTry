@@ -3,3 +3,5 @@ input*
 output*
 temp*
 *.log
+.idea
+*.iml
